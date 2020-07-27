@@ -1,0 +1,436 @@
+set-option global tabstop 4
+
+source "%val{config}/plugins/plug.kak/rc/plug.kak"
+plug "mayjs/openscad.kak"
+plug "andreyorst/smarttab.kak" defer smarttab %{
+    set-option global softtabstop 4
+
+    set-option global smarttab_expandtab_mode_name 'exp'
+    set-option global smarttab_noexpandtab_mode_name 'noexp'
+} config %{
+    # expandtab by default, don't for makefiles
+    hook global BufCreate .* expandtab
+    hook global BufSetOption filetype=makefile noexpandtab
+}
+
+plug "alexherbo2/search-highlighter.kak" %{
+    #hook global WinCreate .* search-highlighter-enable
+}
+
+plug "alexherbo2/surround.kak" %{
+    # Run with default pairs
+    map global user s ': surround<ret>' -docstring 'Enter surround mode'
+    # Add the pairs __ and **
+    map global user S ': surround _ _ * *<ret>' -docstring 'Enter surround mode with extra surrounding pairs'
+}
+
+
+plug "andreyorst/base16-gruvbox.kak" noload do %{
+        mkdir -p $HOME/.config/kak/colors
+            find $PWD -type f -name "*.kak" -exec ln -sf {} $HOME/.config/kak/colors/ \;
+} config %{
+        colorscheme base16-gruvbox-dark-medium # or any other variant
+}
+
+# plug "andreyorst/tagbar.kak" defer "tagbar" %{
+# #    set-option global tagbar_sort false
+# #    set-option global tagbar_size 40
+# #    set-option global tagbar_display_anon false
+# } config %{
+#     # if you have wrap highlighter enabled in you configuration
+#     # files it's better to turn it off for tagbar, using this hook:
+#     hook global WinSetOption filetype=tagbar %{
+#         remove-highlighter window/wrap
+#         # you can also disable rendering whitespaces here, line numbers, and
+#         # matching characters
+#     }
+# }
+
+plug "occivink/kakoune-phantom-selection" %{
+	map global normal <a-p> ':phantom-selection-add-selection<ret>'
+	map global normal <a-P> ':phantom-selection-select-all; phantom-selection-clear<ret>'
+	map global normal <a-n> ':phantom-selection-iterate-next<ret>'
+	map global normal <a-N> ':phantom-selection-iterate-prev<ret>'
+}
+
+plug "occivink/kakoune-expand" %{
+	map global normal + ':expand<ret>'
+    set-option global expand_commands %{
+        expand-impl %{ exec <a-i>w }
+        expand-impl %{ exec <a-a>b }
+        expand-impl %{ exec <a-a>B }
+        expand-impl %{ exec <a-a>r }
+        expand-impl %{ exec '_<a-:><a-semicolon><a-i>i' }
+        expand-impl %{ exec <a-x>  }
+        expand-impl %{ exec <a-i>p }
+        expand-impl %{ exec '<a-:><a-semicolon>K<a-K>^$<ret><a-i>i' } # previous indent level (upward)
+        expand-impl %{ exec '<a-:>j<a-K>^$<ret><a-i>i' }      # previous indent level (downward)
+    }
+}
+
+plug 'delapouite/kakoune-auto-percent'
+
+plug 'JJK96/kakoune-python-bridge' %{
+  # Suggested mapping
+  map global normal = ': python-bridge-send<ret><a-o>jP'
+  # run some python code initially
+  python-bridge-send '"from math import *"'
+}
+
+plug 'delapouite/kakoune-hump' %{
+  # Suggested mappings
+  map global normal <a-b> ': select-previous-hump<ret>' -docstring 'select prev hump'
+  map global normal <a-w> ': select-next-hump<ret>'     -docstring 'select next hump'
+  map global normal <a-B> ': extend-previous-hump<ret>' -docstring 'extend prev hump'
+  map global normal <a-W> ': extend-next-hump<ret>'     -docstring 'extend next hump'
+}
+
+plug 'maximbaz/restclient.kak'
+
+# Snippets and andreyorst's snippet collections
+# plug "occivink/kakoune-snippets" config %{
+#     set-option -add global snippets_directories "%opt{plug_install_dir}/kakoune-snippet-collection/snippets"
+# 
+#     hook global WinCreate .*\.tex %{
+#         map global normal '<c-t>' 'i\begin'
+#     }
+# }
+# plug "mayjs/kakoune-snippet-collection"
+
+# Don't set title of the terminal
+hook global WinCreate .* %{
+    set-option global ui_options "ncurses_set_title=%sh{pwd}"
+}
+
+# colorscheme dracula
+
+add-highlighter global/ number-lines
+add-highlighter global/ show-matching
+
+eval %sh{kak-lsp --log /tmp/kaklsp --kakoune -s $kak_session}
+lsp-enable
+lsp-auto-signature-help-enable
+declare-option bool lsp_signature_stash false
+declare-option str  stash_file '/tmp/kakstash'
+define-command -override -hidden lsp-show-signature-help -params 2 -docstring "Render signature help" %{
+    evaluate-commands %sh{
+        if [ "$kak_opt_lsp_signature_stash" = "true" ]; then
+            printf "%s\n" "$2" >> "$kak_opt_stash_file"
+            echo "set-option window lsp_signature_stash false"
+        else
+            echo 'echo %arg{2}'
+        fi
+        echo "echo -debug 'runnnning $kak_opt_lsp_signature_stash'"
+    }
+}
+define-command lsp-stash-signature -docstring "Stash the current signature" %{
+    set-option window lsp_signature_stash true
+    lsp-signature-help
+}
+declare-option bool lsp_hover_stash false
+define-command -override -hidden lsp-show-hover -params 3 -docstring %{
+    lsp-show-hover <anchor> <info> <diagnostics>
+    Render hover info.
+} %{ evaluate-commands %sh{
+    lsp_info=$2
+    lsp_diagnostics=$3
+    content=$(eval "${kak_opt_lsp_show_hover_format}")
+    # remove leading whitespace characters
+    content="${content#"${content%%[![:space:]]*}"}"
+    # remove trailing whitespace characters
+    content="${content%"${content##*[![:space:]]}"}"
+
+    if [ $kak_opt_lsp_hover_max_lines -gt 0 ]; then
+        content=$(printf %s "$2" | head -n $kak_opt_lsp_hover_max_lines)
+    fi
+
+    content=$(printf %s "$content" | sed s/\'/\'\'/g)
+
+    if [ "$kak_opt_lsp_hover_stash" = "true" ]; then
+        printf "%s\n" "$2" >> "$kak_opt_stash_file"
+        echo "set-option window lsp_hover_stash false"
+    else
+        case $kak_opt_lsp_hover_anchor in
+            true) printf "info -anchor %%arg{1} '%s'" "$content";;
+            *)    printf "info '%s'" "$content";;
+        esac
+    fi
+}}
+define-command lsp-stash-hover -docstring "Stash the current hover content" %{
+    set-option window lsp_hover_stash true
+    lsp-hover
+}
+
+declare-option -hidden bool lsp_auto_hover false
+define-command -override lsp-auto-hover-enable -docstring "Enable auto-requesting hover info for current position" %{
+    set-option global lsp_auto_hover true
+    hook -group lsp-auto-hover global NormalIdle .* %{
+        lsp-hover
+    }
+}
+define-command -override lsp-auto-hover-disable -docstring "Disable auto-requesting hover info for current position" %{
+    set-option global lsp_auto_hover false
+    remove-hooks global lsp-auto-hover
+}
+define-command lsp-auto-hover-toggle -docstring "Toggle auto-requesting hover info for current position" %{
+    evaluate-commands %sh{
+        if [ "$kak_opt_lsp_auto_hover" = "true" ]; then
+            echo "echo -markup 'LSP auto hover {Error}disabled'"
+            echo "lsp-auto-hover-disable"
+        else
+            echo "echo -markup 'LSP auto hover {Error}enabled'"
+            echo "lsp-auto-hover-enable"
+        fi
+    }
+}
+map -docstring "Toggle lsp auto hover" global user h ":lsp-auto-hover-toggle<ret>"
+
+# hook global WinSetOption filetype=c %{
+#     set-option window clang_options %sh{cat .clang_complete | paste -sd " "}
+#     clang-enable-autocomplete; clang-enable-diagnostics
+
+
+#     hook window -group clang-autocomplete InsertIdle .* %{
+#         echo 'completing...'
+#         clang-complete
+#         clang-show-completion-info
+#     }
+# }
+
+
+map global user P '<a-!>xsel --output --primary<ret>' -docstring 'Paste X11s primary selection'
+map global user p '<a-!>xsel --output --clipboard<ret>' -docstring 'Paste X11s clipboard selection'
+map global user y '$xsel --input --clipboard<ret>' -docstring 'Yank into X11s clipboard'
+
+
+define-command dmenu-buffers \
+-docstring 'Select an open buffer using dmenu' %{ evaluate-commands %sh{
+        BUFFER=$(printf "%s\n" "${kak_buflist}" | tr " " "\n" | dmenu | tr -d \')
+        if [ -n "$BUFFER" ]; then
+            printf "%s\n" "buffer ${BUFFER}"
+        fi
+} }
+map global user b ':dmenu-buffers<ret>' -docstring 'Select a buffer using dmenu'
+
+define-command dmenu-files \
+-docstring 'Select a file using dmenu' %{ evaluate-commands %sh{
+        # if [ -e ".findignore" ]; then
+        #     # PATTERNS="$(sed -e "s/^/-not -path \'/g;s/$/\'/g" .findignore)"
+        #     # PATTERNS="$(awk '{print  "-not -path '$0'"}' .findignore)"
+        #     convert () {
+        #         cat "$1" | while read line
+        #         do
+        #             echo "! -path \\\"$line\""
+        #         done | tr -d '\n'
+        #     }
+        #     PATTERNS="$(convert .findignore)"
+        # fi
+        #printf "echo -debug 'Patterns: %s'\n" "$PATTERNS"
+        #printf "echo -debug %s" "find . $PATTERNS -not -path '*/\.git/*' -type f | head -n 10000 | dmenu -i -l 30 -p "Edit file""
+        FILE=$(rg --files | head -n 10000 | dmenu -i -l 30 -p "Edit file")
+        if [ -n "$FILE" ]; then
+            printf "%s\n" "edit ${FILE}"
+        fi
+} }
+map global user f ':dmenu-files<ret>' -docstring 'Select a file using dmenu'
+
+# Search for a ctags tags file
+hook global KakBegin .* %{
+    evaluate-commands %sh{
+        path="$PWD"
+        while [ "$path" != "$HOME" ] && [ "$path" != "/" ]; do
+            if [ -e "./tags" ]; then
+                printf "%s\n" "set-option -add current ctagsfiles %{$path/tags}"
+                break
+            else
+                cd ..
+                path="$PWD"
+            fi
+        done
+    }
+}
+
+# NOTE: readtags can filter by kind using readtags -Q '(eq? $kind "function")' -l
+define-command -docstring 'Jump to a ctag using dmenu, using a filter' -params 1 jump-to-ctag-filtered  %{ evaluate-commands %sh{
+    SYMBOLS=""
+    for tags_file in ${kak_opt_ctagsfiles}
+    do
+        SYMBOLS="${SYMBOLS}$(readtags -t ${tags_file} -Q "$@" -l)"
+        #echo "readtags -t ${tags_file} -Q '$@' -l" | dmenu > /dev/null
+    done
+    SYMBOL=$(printf "%s" "${SYMBOLS}" | cut -f 1 | sort | uniq | dmenu -l 20)
+    if [ -n "$SYMBOL" ]; then
+        printf "ctags-search '%s'" "$SYMBOL"
+    fi
+} }
+define-command jump-to-ctag \
+-docstring 'Jump to a ctag using dmenu' %{ 
+    jump-to-ctag-filtered "()"
+}
+define-command -docstring 'Insert a ctag name from all ctags passing the filter' -params 1 insert-ctag-filtered %{ evaluate-commands %sh{
+    SYMBOLS=""
+    for tags_file in ${kak_opt_ctagsfiles}
+    do
+        SYMBOLS="${SYMBOLS}$(readtags -t ${tags_file} -Q "$@" -l)"
+        #echo "readtags -t ${tags_file} -Q '$@' -l" | dmenu > /dev/null
+    done
+    SYMBOL=$(printf "%s" "${SYMBOLS}" | cut -f 1 | sort | uniq | dmenu -l 20)
+    if [ -n "$SYMBOL" ]; then
+        printf "set-register t '%s'" "$SYMBOL"
+        # printf "execute-keys a<c-r>t"
+    fi
+} }
+
+define-command -docstring 'Create a stash FIFO' mkstash %{
+    evaluate-commands %sh{
+        STASHNAME="$kak_opt_stash_file"
+        rm "$STASHNAME"
+        mkfifo "$STASHNAME"
+        printf 'new edit -fifo "%s" *stash*' "$STASHNAME"
+    }
+}
+
+define-command -docstring 'Open a dedicated client for tool (e.g. make) output' create-toolsclient %{
+    new rename-client tools
+    set global toolsclient tools
+}
+# define-command jump-to-ctag \
+# -docstring 'Jump to a ctag using dmenu' %{ evaluate-commands %sh{
+#     SYMBOLS=""
+#     for tags_file in ${kak_opt_ctagsfiles}
+#     do
+#         SYMBOLS="${SYMBOLS}$(readtags -t ${tags_file} -l)"
+#     done
+#     SYMBOL=$(printf "%s" "${SYMBOLS}" | cut -f 1 | sort | uniq | dmenu)
+#     if [ -n "$SYMBOL" ]; then
+#         printf "ctags-search '%s'" "$SYMBOL"
+#     fi
+# } }
+map global user t ':jump-to-ctag<ret>' -docstring 'Jump to a ctag'
+
+
+map global user o ':jump-to-ctag-filtered "(suffix? ""%val{buffile}"" $input)"<ret>'\
+    -docstring 'Jump to a ctag in this file'
+
+map global user m ':make<ret>' -docstring 'Make'
+
+hook global WinCreate .*\.py %{
+    # if head -n 1 shield.py | grep "# SKIDL" > /dev/null ; then; echo test; fi
+    map window user d '<esc>oimport pdb; pdb.set_trace()<esc>' -docstring 'Insert a python breakpoint'
+    # Add a highlighter for breakpoints. Match breakpoints with regex, and hightlight the first capture group
+    # (idx 0 is the whole match)
+    add-highlighter window/ regex '^[ \t]*(import pdb; pdb.set_trace\(\))' 1:red,black+F
+}
+
+define-command -docstring "Toggle line wrapping" toggle-wrap %{
+    # add-highlighter will fail if window/linewrap already exists, leading us to the catch case
+    try %{
+        add-highlighter window/linewrap wrap -indent -word -marker "> "
+    } catch %{
+        remove-highlighter window/linewrap
+    }
+}
+hook global WinCreate .*\.md %{
+    toggle-wrap
+}
+map global user w ':toggle-wrap<ret>' -docstring 'Toggle visual line wrapping'
+
+map global user / '/(?i)' -docstring 'Case insensitive search'
+
+map global user l ':lint<ret>:echo "Linting..."<ret>' -docstring 'Lint this buffer'
+hook global WinSetOption filetype=latex %{
+    set window lintcmd 'textidote2kak.py'
+    lint-enable
+}
+
+map global user , ":enter-user-mode lsp<ret>" -docstring 'LSP Mode'
+
+hook global WinSetOption filetype=json %{
+  set window formatcmd 'python3 -m json.tool'
+}
+
+define-command -docstring "Insert a latex cite using ctags" insert-latex-cite %{
+    insert-ctag-filtered '(suffix? $input ".bib")'
+    execute-keys 'a\<esc>;acite{<c-r>t}<esc>'
+}
+
+# Use ctags to complete cites and stuff in latex
+hook global WinSetOption filetype=latex %{
+    ctags-enable-autocomplete
+    map window user c ':insert-latex-cite<ret>' -docstring 'Insert a citation'
+}
+
+# Minimal support for C# related files
+hook global BufCreate .*[.](csproj) %{
+    set-option buffer filetype xml
+}
+hook global BufCreate .*[.](cake) %{
+    set-option buffer filetype cpp
+}
+
+declare-option -hidden bool lsp_enable_rust_analyzer_inlay_hints false
+
+define-command -docstring "Enable inlay hints for rust" lsp-enable-rust-inlay-hints %{
+    set-option window lsp_enable_rust_analyzer_inlay_hints true
+    hook window -group rust-inlay-hints BufReload .* rust-analyzer-inlay-hints
+    hook window -group rust-inlay-hints NormalIdle .* rust-analyzer-inlay-hints
+    hook window -group rust-inlay-hints InsertIdle .* rust-analyzer-inlay-hints
+}
+
+define-command -docstring "Disable inlay hints for rust" lsp-disable-rust-inlay-hints %{
+    set-option window lsp_enable_rust_analyzer_inlay_hints false
+    remove-hooks window rust-inlay-hints
+    # Undocumented option rust_analyzer_inlay_hints controls the content of inlay hints
+    set buffer rust_analyzer_inlay_hints
+}
+define-command lsp-toggle-rust-inlay-hints -docstring "Toggle rust inlay hints" %{
+    evaluate-commands %sh{
+        if [ "$kak_opt_lsp_enable_rust_analyzer_inlay_hints" = "true" ]; then
+            echo "echo -markup 'Inlay Hints {Error}disabled'"
+            echo "lsp-disable-rust-inlay-hints"
+        else
+            echo "echo -markup 'Inlay Hints {Error}enabled'"
+            echo "lsp-enable-rust-inlay-hints"
+        fi
+    }
+}
+
+hook global WinSetOption filetype=rust %{
+    lsp-enable-rust-inlay-hints
+    hook -once -always window WinSetOption filetype=.* %{
+        lsp-disable-rust-inlay-hints
+    }
+    map -docstring "Toggle inlay hints" window user i ":lsp-toggle-rust-inlay-hints<ret>"
+}
+hook global BufCreate .*/Cargo\.toml %{
+    map buffer user c '<a-o>j!choose_crate.sh<ret>' -docstring 'Insert a Cargo dependency'
+}
+hook global WinSetOption filetype=toml %{
+    set-option window formatcmd toml-fmt
+}
+set-face global InlayDiagnosticWarning default,default+ia@comment
+set-face global InlayDiagnosticError default,default+ia@comment
+set-face global InlayHint default,default+ia@comment
+lsp-inlay-diagnostics-enable global
+
+define-command show-color -docstring 'show main selection color in status bar' %{
+  evaluate-commands %sh{
+    awk_script='{
+      if ((x=index($1,"#")) > 0)
+        $1 = substr($1, x+1)
+      if (length($1) == 8)
+        $1 = substr($1, 1, 6)
+      if (length($1) == 4)
+        $1 = substr($1, 1, 3)
+      if (length($1) == 3) {
+        r = substr($1, 1, 1)
+        g = substr($1, 2, 1)
+        b = substr($1, 3, 1)
+        $1 = r r g g b b
+      }
+      print "evaluate-commands -client " client " echo -markup {rgb:" $1 "} ██████"
+    }'
+    printf %s\\n "$kak_selection" | awk -v client="$kak_client" "$awk_script" | kak -p "$kak_session"
+  }
+}
+
